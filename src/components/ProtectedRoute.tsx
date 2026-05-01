@@ -5,31 +5,27 @@ import { AUTH_PATH, dashboardPathByRole } from "@/lib/routes";
 interface ProtectedRouteProps {
   children: JSX.Element;
   allowedRoles?: UserRole[];
+  allowUnverified?: boolean;
 }
 
-export default function ProtectedRoute({ children, allowedRoles }: ProtectedRouteProps) {
+export default function ProtectedRoute({ children, allowedRoles, allowUnverified = false }: ProtectedRouteProps) {
   const { user, isLoggedIn } = useAuth();
   const location = useLocation();
+
+  if (!user && isLoggedIn) {
+    return <div className="min-h-screen flex items-center justify-center">Loading...</div>;
+  }
 
   if (!isLoggedIn || !user) {
     return <Navigate to={`${AUTH_PATH}?mode=signin&redirect=${encodeURIComponent(location.pathname + location.search)}`} replace />;
   }
 
-  if (allowedRoles && !allowedRoles.includes(user.role)) {
-    return <Navigate to={dashboardPathByRole[user.role]} replace />;
+  if (!allowUnverified && user.role !== "tourist" && !user.isApproved) {
+    return <Navigate to="/pending-approval" replace />;
   }
 
-  if (["host", "guide", "chef"].includes(user.role) && user.status?.toUpperCase() === "PENDING") {
-    return (
-      <div className="min-h-screen flex items-center justify-center p-6 bg-background">
-        <div className="max-w-md w-full bg-card border border-border rounded-xl p-6 text-center">
-          <h2 className="text-xl font-bold text-foreground mb-2">Profile Under Review</h2>
-          <p className="text-sm text-muted-foreground">
-            Your account is pending admin approval. You can access your dashboard once your status becomes APPROVED.
-          </p>
-        </div>
-      </div>
-    );
+  if (allowedRoles && !allowedRoles.includes(user.role)) {
+    return <Navigate to={dashboardPathByRole[user.role]} replace />;
   }
 
   return children;

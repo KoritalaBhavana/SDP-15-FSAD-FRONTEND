@@ -1,29 +1,37 @@
 import { useEffect, useState } from "react";
 import { homestaysApi } from "@/lib/api";
-import { getAllHomestays } from "@/lib/homestayStore";
 import { adaptHomestay, type FrontendHomestay } from "@/lib/homestayApiAdapter";
 
 export const useHomestays = () => {
-  const [homestays, setHomestays] = useState<FrontendHomestay[]>(() => getAllHomestays());
+  const [homestays, setHomestays] = useState<FrontendHomestay[]>([]);
 
   useEffect(() => {
     let ignore = false;
 
-    const loadHomestays = async () => {
+    const refreshHomestays = async () => {
       try {
         const response = await homestaysApi.getAll();
-        if (!ignore && Array.isArray(response) && response.length > 0) {
+        if (!ignore && Array.isArray(response)) {
           setHomestays(response.map(adaptHomestay));
         }
       } catch {
-        // Keep local fallback data when the backend is not reachable yet.
+        if (!ignore) {
+          setHomestays([]);
+        }
       }
     };
 
-    loadHomestays();
+    refreshHomestays();
+
+    const handleHomestaysUpdated = () => {
+      void refreshHomestays();
+    };
+
+    window.addEventListener("travelnest:homestays-updated", handleHomestaysUpdated);
 
     return () => {
       ignore = true;
+      window.removeEventListener("travelnest:homestays-updated", handleHomestaysUpdated);
     };
   }, []);
 

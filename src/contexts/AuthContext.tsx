@@ -5,12 +5,17 @@ export type UserRole = "tourist" | "host" | "guide" | "admin" | "chef";
 const SESSION_DURATION_MS = 24 * 60 * 60 * 1000;
 
 export interface AuthUser {
-  id: number;
+  id: string;
   name: string;
   email: string;
   role: UserRole;
+  isVerified: boolean;
+  isApproved: boolean;
+  onboardingCompleted?: boolean;
   profileImage?: string;
   status?: string;
+  isNew?: boolean;
+  isNewUser?: boolean;
   token?: string;
   avatar?: string;
   sessionExpiresAt?: number;
@@ -45,14 +50,32 @@ const toRole = (role: string | undefined): UserRole => {
   return "tourist";
 };
 
+const normalizeVerification = (role: UserRole, status?: string, isVerified?: boolean): boolean => {
+  if (typeof isVerified === "boolean") {
+    return isVerified;
+  }
+
+  if (!["host", "guide", "chef"].includes(role)) {
+    return true;
+  }
+
+  const normalizedStatus = String(status || "").trim().toUpperCase();
+  return normalizedStatus === "APPROVED" || normalizedStatus === "ACTIVE";
+};
+
 const mapApiUser = (data: ApiUser): AuthUser => ({
-  id: Number(data.id),
+  id: String(data.id),
   name: data.name,
   email: data.email,
   role: toRole(data.role),
+  isVerified: normalizeVerification(toRole(data.role), data.status, data.isVerified),
+  isApproved: data.isApproved ?? (toRole(data.role) === "tourist" ? true : normalizeVerification(toRole(data.role), data.status, data.isVerified)),
+  onboardingCompleted: true,
   profileImage: data.profileImage,
   avatar: data.profileImage,
   status: data.status,
+  isNew: data.isNew ?? data.isNewUser,
+  isNewUser: data.isNewUser ?? data.isNew ?? false,
   token: data.token,
   sessionExpiresAt: Date.now() + SESSION_DURATION_MS,
 });
@@ -68,7 +91,14 @@ const initialUser = (): AuthUser | null => {
       localStorage.removeItem(STORAGE_KEY);
       return null;
     }
-    return parsed;
+    return {
+      ...parsed,
+      id: String(parsed.id),
+      isVerified: typeof parsed.isVerified === "boolean" ? parsed.isVerified : normalizeVerification(parsed.role, parsed.status, undefined),
+      isApproved: typeof parsed.isApproved === "boolean" ? parsed.isApproved : normalizeVerification(parsed.role, parsed.status, undefined),
+      onboardingCompleted: true,
+      isNewUser: parsed.isNewUser ?? parsed.isNew ?? false,
+    };
   } catch {
     localStorage.removeItem(STORAGE_KEY);
     return null;
@@ -84,9 +114,13 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     setUser(nextUser);
     if (!nextUser) {
       localStorage.removeItem(STORAGE_KEY);
+      localStorage.removeItem("token");
       return;
     }
     localStorage.setItem(STORAGE_KEY, JSON.stringify(nextUser));
+    if (nextUser.token) {
+      localStorage.setItem("token", nextUser.token);
+    }
   };
 
   const login = async (email: string, password: string, role: UserRole) => {
@@ -108,7 +142,17 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       role: data.role.toUpperCase(),
       phone: data.phone,
     });
-    persistUser(mapApiUser(response as ApiUser));
+    const created = mapApiUser(response as ApiUser);
+    const requiresApproval = ["host", "guide", "chef"].includes(created.role);
+    persistUser({
+      ...created,
+      isVerified: requiresApproval ? false : created.isVerified,
+      isApproved: created.role === "tourist" ? true : false,
+      onboardingCompleted: true,
+      isNew: false,
+      isNewUser: false,
+      status: created.status || (requiresApproval ? "PENDING" : "APPROVED"),
+    });
   };
 
   const authWithGoogle = async (role: UserRole, mode: "signin" | "signup", token?: string) => {

@@ -1,6 +1,7 @@
 import { homestays } from "@/lib/mockData";
 
 const HOST_HOMESTAYS_STORAGE_KEY = "travelnest_host_homestays_v1";
+const HOMESTAYS_UPDATED_EVENT = "travelnest:homestays-updated";
 
 export interface HomestayRecord {
   id: string;
@@ -62,6 +63,13 @@ const writeStoredHostHomestays = (records: HomestayRecord[]) => {
   }
 
   window.localStorage.setItem(HOST_HOMESTAYS_STORAGE_KEY, JSON.stringify(records));
+  window.dispatchEvent(new CustomEvent(HOMESTAYS_UPDATED_EVENT));
+};
+
+const upsertStoredHostHomestays = (record: HomestayRecord) => {
+  const existing = getHostCreatedHomestays();
+  const next = [record, ...existing.filter((item) => item.id !== record.id)];
+  writeStoredHostHomestays(next);
 };
 
 export const toHostDashboardProperty = (homestay: HomestayRecord): HostDashboardProperty => ({
@@ -122,6 +130,11 @@ export const addHostHomestay = (params: {
   return createdHomestay;
 };
 
+export const syncHostHomestay = (record: HomestayRecord): HomestayRecord => {
+  upsertStoredHostHomestays(record);
+  return record;
+};
+
 export const deleteHostHomestay = (homestayId: string): boolean => {
   const existing = getHostCreatedHomestays();
   const updated = existing.filter((homestay) => homestay.id !== homestayId);
@@ -133,3 +146,5 @@ export const deleteHostHomestay = (homestayId: string): boolean => {
   writeStoredHostHomestays(updated);
   return true;
 };
+
+export const HOMESTAY_UPDATED_EVENT_NAME = HOMESTAYS_UPDATED_EVENT;

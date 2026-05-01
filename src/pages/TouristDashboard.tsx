@@ -4,9 +4,9 @@ import { useAuth } from "@/contexts/AuthContext";
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
 import HomestayCard from "@/components/HomestayCard";
-import { attractions } from "@/lib/mockData";
 import { useHomestays } from "@/hooks/useHomestays";
-import { bookingsApi } from "@/lib/api";
+import { attractionsApi, bookingsApi, notificationsApi, usersApi } from "@/lib/api";
+import { uploadFiles } from "@/lib/upload";
 import { DEFAULT_AVATAR, getAvatarSrc } from "@/lib/avatar";
 import { loadWishlistIds } from "@/lib/travelPreferences";
 import { toast } from "sonner";
@@ -30,11 +30,7 @@ export default function TouristDashboard() {
   const [blogDraft, setBlogDraft] = useState("");
   const [publishedBlogs, setPublishedBlogs] = useState<Array<{ id: string; title: string; content: string; createdAt: string }>>([]);
 
-  const notifications = [
-    "Your trip to Manali is confirmed.",
-    "Price drop alert: Beachside Paradise is now ₹2,300/night.",
-    "You got a new review reply from Mountain Dew Cottage.",
-  ];
+  const [notifications, setNotifications] = useState<string[]>([]);
 
   const tabs = [
     { id: "discover", label: "Discover", icon: LayoutDashboard },
@@ -45,16 +41,10 @@ export default function TouristDashboard() {
     { id: "profile", label: "Profile", icon: User },
   ];
 
-  const [upcomingTrips, setUpcomingTrips] = useState([
-    { id: "1", homestay: "Mountain Dew Cottage", location: "Manali", dates: "Mar 15 - Mar 18, 2025", guests: 2, amount: 3600, status: "Confirmed", image: "/src/assets/homestay-1.jpg" },
-    { id: "2", homestay: "Kerala Heritage Home", location: "Munnar", dates: "Apr 5 - Apr 8, 2025", guests: 4, amount: 5400, status: "Pending", image: "https://images.unsplash.com/photo-1499793983690-e29da59ef1c2?w=400&q=80" },
-  ]);
+  const [upcomingTrips, setUpcomingTrips] = useState<any[]>([]);
+  const [touristAttractions, setTouristAttractions] = useState<any[]>([]);
 
-  const historyTrips = [
-    { id: "h1", name: "Desert Dunes Camp", location: "Jaisalmer", date: "Dec 2024", amount: 7000, rating: 5 },
-    { id: "h2", name: "Beachside Paradise", location: "Goa", date: "Oct 2024", amount: 5000, rating: 4 },
-    { id: "h3", name: "Rishikesh River View", location: "Rishikesh", date: "Aug 2024", amount: 1998, rating: 5 },
-  ];
+  const historyTrips = upcomingTrips.filter((trip) => trip.status === "Completed");
 
   const handleStatClick = (label: string) => {
     if (label === "Trips Taken") {
@@ -75,8 +65,23 @@ export default function TouristDashboard() {
   };
 
   const handleSaveProfile = () => {
-    updateProfile({ name: profileName.trim(), email: profileEmail.trim(), avatar: profileAvatar });
-    toast.success("Profile settings updated.");
+    const saveProfile = async () => {
+      try {
+        if (user?.id) {
+          await usersApi.update(Number(user.id), {
+            name: profileName.trim(),
+            email: profileEmail.trim(),
+            profileImage: profileAvatar,
+          });
+        }
+        updateProfile({ name: profileName.trim(), email: profileEmail.trim(), avatar: profileAvatar });
+        toast.success("Profile settings updated.");
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : "Could not update profile.");
+      }
+    };
+
+    void saveProfile();
   };
 
   useEffect(() => {
@@ -106,7 +111,7 @@ export default function TouristDashboard() {
       }
       try {
         const apiBookings = await bookingsApi.getByTourist(Number(user.id));
-        if (Array.isArray(apiBookings) && apiBookings.length > 0) {
+        if (Array.isArray(apiBookings)) {
           setUpcomingTrips(apiBookings.map((booking: any) => ({
             id: String(booking.id),
             homestay: `Homestay #${booking.homestayId}`,
@@ -119,7 +124,7 @@ export default function TouristDashboard() {
           })));
         }
       } catch {
-        // Keep local mock state when backend is not reachable.
+        setUpcomingTrips([]);
       }
     };
 
@@ -139,15 +144,66 @@ export default function TouristDashboard() {
     void syncWishlist();
   }, [user?.id, user?.role]);
 
+  useEffect(() => {
+    const loadNotifications = async () => {
+      if (!user?.id) {
+        return;
+      }
+      try {
+        const response = await notificationsApi.getByUser(Number(user.id));
+        if (Array.isArray(response)) {
+          setNotifications(response.map((item: any) => item.message || String(item)));
+        }
+      } catch {
+        setNotifications([]);
+      }
+    };
+
+    void loadNotifications();
+  }, [user?.id]);
+
+  useEffect(() => {
+    const loadAttractions = async () => {
+      try {
+        const response = await attractionsApi.getAll();
+        setTouristAttractions(Array.isArray(response) ? response.map((attr: any) => ({
+          id: String(attr.id),
+          name: attr.name,
+          location: attr.location || attr.city || "",
+          image: attr.imageUrl || "",
+          bestTime: attr.bestTime || "Anytime",
+          description: attr.description || "",
+          category: attr.category || "General",
+          distance: `${attr.distanceKm || 0} km`,
+          entryFee: Number(attr.entryFee || 0),
+        })) : []);
+      } catch {
+        setTouristAttractions([]);
+      }
+    };
+
+    void loadAttractions();
+  }, []);
+
   const handleAvatarUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
 
-    const reader = new FileReader();
-    reader.onload = () => {
-      setProfileAvatar(String(reader.result || ""));
+    const upload = async () => {
+      try {
+        const [url] = await uploadFiles([file]);
+        setProfileAvatar(url);
+        toast.success("Profile image uploaded.");
+      } catch {
+        const reader = new FileReader();
+        reader.onload = () => {
+          setProfileAvatar(String(reader.result || ""));
+        };
+        reader.readAsDataURL(file);
+      }
     };
-    reader.readAsDataURL(file);
+
+    void upload();
   };
 
   const activeBookings = upcomingTrips.filter((trip) => trip.status !== "Cancelled");
@@ -159,11 +215,22 @@ export default function TouristDashboard() {
   };
 
   const handleCancelBooking = (tripId: string) => {
-    setUpcomingTrips((prev) => prev.map((trip) => (trip.id === tripId ? { ...trip, status: "Cancelled" } : trip)));
-    if (selectedTripId === tripId) {
-      setSelectedTripId(null);
+    const cancelBooking = async () => {
+      try {
+        await bookingsApi.updateStatus(Number(tripId), "CANCELLED");
+        setUpcomingTrips((prev) => prev.map((trip) => (trip.id === tripId ? { ...trip, status: "Cancelled" } : trip)));
+        if (selectedTripId === tripId) {
+          setSelectedTripId(null);
+        }
+        toast.success("Booking cancelled.");
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : "Could not cancel booking.");
+      }
+    };
+
+    if (window.confirm("Cancel this booking?")) {
+      void cancelBooking();
     }
-    toast.success("Booking cancelled.");
   };
 
   const handleOpenBlogEditor = (trip: { name: string; location: string; date: string }) => {
@@ -285,10 +352,10 @@ export default function TouristDashboard() {
               {/* Stats */}
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 {[
-                  { label: "Trips Taken", value: "7", icon: "✈️" },
-                  { label: "Wishlist", value: "12", icon: "❤️" },
-                  { label: "Reviews Given", value: "5", icon: "⭐" },
-                  { label: "Places Visited", value: "18", icon: "📍" },
+                  { label: "Trips Taken", value: String(historyTrips.length), icon: "\u2708\uFE0F" },
+                  { label: "Wishlist", value: String(wishlistIds.length), icon: "\u2764\uFE0F" },
+                  { label: "Reviews Given", value: "0", icon: "\u2B50" },
+                  { label: "Places Visited", value: String(historyTrips.length), icon: "\uD83D\uDCCD" },
                 ].map((stat) => (
                   <button
                     key={stat.label}
@@ -331,6 +398,11 @@ export default function TouristDashboard() {
                       </div>
                     </div>
                   ))}
+                  {activeBookings.length === 0 && (
+                    <div className="card-travel p-6 text-center text-muted-foreground">
+                      No data yet. Start by adding your first item.
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -346,6 +418,11 @@ export default function TouristDashboard() {
                   {homestays.slice(0, 3).map((h) => (
                     <HomestayCard key={h.id} homestay={h} />
                   ))}
+                  {homestays.length === 0 && (
+                    <div className="card-travel p-6 text-center text-muted-foreground">
+                      No data yet. Start by adding your first item.
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -357,7 +434,7 @@ export default function TouristDashboard() {
                   <button onClick={() => setActiveTab("attractions")} className="text-primary text-sm font-medium">View all</button>
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-                  {attractions.slice(0, 3).map((attr) => (
+                  {touristAttractions.slice(0, 3).map((attr) => (
                     <div key={attr.id} className="card-travel overflow-hidden">
                       <img
                         src={attr.image}
@@ -373,6 +450,11 @@ export default function TouristDashboard() {
                       </div>
                     </div>
                   ))}
+                  {touristAttractions.length === 0 && (
+                    <div className="card-travel p-6 text-center text-muted-foreground">
+                      No data yet. Start by adding your first item.
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
@@ -384,7 +466,7 @@ export default function TouristDashboard() {
                 <MapPin className="h-5 w-5 text-primary" /> Tourist Attractions
               </h2>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-                {attractions.map((attr) => (
+                {touristAttractions.map((attr) => (
                   <div key={attr.id} className="card-travel overflow-hidden">
                     <img
                       src={attr.image}
@@ -407,6 +489,11 @@ export default function TouristDashboard() {
                     </div>
                   </div>
                 ))}
+                {touristAttractions.length === 0 && (
+                  <div className="card-travel p-6 text-center text-muted-foreground">
+                    No data yet. Start by adding your first item.
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -553,10 +640,10 @@ export default function TouristDashboard() {
                       <span className="text-white text-lg">🏠</span>
                     </div>
                     <div className="flex-1">
-                      <h3 className="font-semibold text-foreground">{h.name}</h3>
-                      <p className="text-sm text-muted-foreground">{h.location} • {h.date}</p>
+                      <h3 className="font-semibold text-foreground">{h.homestay}</h3>
+                      <p className="text-sm text-muted-foreground">{h.location} - {h.dates}</p>
                       <button
-                        onClick={() => handleOpenBlogEditor({ name: h.name, location: h.location, date: h.date })}
+                        onClick={() => handleOpenBlogEditor({ name: h.homestay, location: h.location, date: h.dates })}
                         className="text-sm text-primary font-medium hover:underline mt-1"
                       >
                         Write blog (optional)
@@ -565,13 +652,18 @@ export default function TouristDashboard() {
                     <div className="text-right">
                       <div className="font-bold text-foreground">₹{h.amount.toLocaleString()}</div>
                       <div className="flex items-center gap-0.5 justify-end">
-                        {Array.from({ length: h.rating }).map((_, i) => (
+                        {Array.from({ length: 0 }).map((_, i) => (
                           <Star key={i} className="h-3 w-3 fill-accent text-accent" />
                         ))}
                       </div>
                     </div>
                   </div>
                 ))}
+                {historyTrips.length === 0 && (
+                  <div className="card-travel p-6 text-center text-muted-foreground">
+                    No data yet. Start by adding your first item.
+                  </div>
+                )}
               </div>
 
               {publishedBlogs.length > 0 && (

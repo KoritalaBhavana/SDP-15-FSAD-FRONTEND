@@ -3,11 +3,10 @@ import { useLocation } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
-import { homestays, guides, chefs } from "@/lib/mockData";
-import { usersApi } from "@/lib/api";
+import { adminApi } from "@/lib/api";
 import { DEFAULT_AVATAR, getAvatarSrc } from "@/lib/avatar";
 import { toast } from "sonner";
-import { Users, Building, Map, Calendar, UserCheck, Shield } from "lucide-react";
+import { Users, Building, Map, Calendar, Shield } from "lucide-react";
 
 type ApplicationStatus = "applied" | "interview_scheduled" | "interviewed" | "appointed" | "rejected";
 
@@ -44,39 +43,20 @@ export default function AdminDashboard() {
   const [userRoleFilter, setUserRoleFilter] = useState<"all" | "tourist" | "host" | "guide" | "chef">("all");
   const [candidateFilter, setCandidateFilter] = useState<"all" | "pending" | "interviewed" | "appointed">("all");
   const [pendingDecision, setPendingDecision] = useState<{ candidateId: string; action: "appoint" | "reject" } | null>(null);
-  const [users, setUsers] = useState<DashboardUser[]>([
-    { id: "u1", name: "Riya Sharma", role: "tourist", email: "riya@example.com", city: "Delhi", status: "Active" },
-    { id: "u2", name: "Arun Singh", role: "host", email: "arun.host@example.com", city: "Manali", status: "Active" },
-    { id: "u3", name: "Neha Das", role: "guide", email: "neha.guide@example.com", city: "Shillong", status: "Pending" },
-    { id: "u4", name: "Rohit Rao", role: "tourist", email: "rohit@example.com", city: "Bengaluru", status: "Active" },
-    { id: "u5", name: "Karan Patel", role: "host", email: "karan.host@example.com", city: "Goa", status: "Pending" },
-    { id: "u6", name: "Ananya Iyer", role: "chef", email: "ananya.chef@example.com", city: "Pondicherry", status: "Pending" },
-  ]);
+  const [users, setUsers] = useState<DashboardUser[]>([]);
 
-  const [candidates, setCandidates] = useState<Candidate[]>([
-    { id: "c1", name: "Ankita Verma", role: "guide", city: "Manali", experience: "6 years", email: "ankita.guide@example.com", status: "applied", resumeFile: "/resumes/ankita-verma-resume.pdf" },
-    { id: "c2", name: "Vivek Nair", role: "host", city: "Munnar", experience: "4 years", email: "vivek.host@example.com", status: "interview_scheduled", interviewDate: "Feb 24, 2026", resumeFile: "/resumes/vivek-nair-resume.pdf" },
-    { id: "c3", name: "Rahul Chauhan", role: "guide", city: "Darjeeling", experience: "8 years", email: "rahul.guide@example.com", status: "interviewed", resumeFile: "/resumes/rahul-chauhan-resume.pdf" },
-    { id: "c4", name: "Meera Joshi", role: "host", city: "Udaipur", experience: "5 years", email: "meera.host@example.com", status: "appointed", resumeFile: "/resumes/meera-joshi-resume.pdf" },
-    { id: "c5", name: "Rohan Kapoor", role: "chef", city: "Goa", experience: "7 years", email: "rohan.chef@example.com", status: "applied", resumeFile: "/resumes/rahul-chauhan-resume.txt" },
-    { id: "c6", name: "Nisha Menon", role: "chef", city: "Kochi", experience: "5 years", email: "nisha.chef@example.com", status: "interview_scheduled", interviewDate: "Feb 27, 2026", resumeFile: "/resumes/meera-joshi-resume.txt" },
-  ]);
+  const [candidates, setCandidates] = useState<Candidate[]>([]);
 
-  const touristsCount = 1280;
-  const hostsCount = homestays.length;
-  const guidesCount = guides.length;
-  const chefsCount = chefs.length;
-
-  const [stats, setStats] = useState<{ tourists: number; hosts: number; guides: number; chefs: number; pendingInterviews: number }>({
-    tourists: touristsCount,
-    hosts: hostsCount,
-    guides: guidesCount,
-    chefs: chefsCount,
+  const [stats, setStats] = useState<{ totalUsers: number; tourists: number; hosts: number; guides: number; chefs: number; pendingInterviews: number }>({
+    totalUsers: 0,
+    tourists: 0,
+    hosts: 0,
+    guides: 0,
+    chefs: 0,
     pendingInterviews: 0,
   });
 
   const pendingInterviews = candidates.filter((candidate) => candidate.status === "applied" || candidate.status === "interview_scheduled").length;
-  const appointedCount = candidates.filter((candidate) => candidate.status === "appointed").length;
 
   const visibleUsers = users.filter((entry) => userRoleFilter === "all" || entry.role === userRoleFilter);
   const isPendingStatus = (status: string) => status.trim().toUpperCase() === "PENDING";
@@ -97,9 +77,20 @@ export default function AdminDashboard() {
 
     try {
       if (targetUser.backendId) {
-        await usersApi.updateStatus(targetUser.backendId, status);
+        if (status === "APPROVED") {
+          await adminApi.approveUser(targetUser.backendId);
+        } else {
+          await adminApi.rejectUser(targetUser.backendId);
+        }
       }
-      setUsers((prev) => prev.map((entry) => (entry.id === userId ? { ...entry, status } : entry)));
+      setUsers((prev) => status === "REJECTED"
+        ? prev.filter((entry) => entry.id !== userId)
+        : prev.map((entry) => (entry.id === userId ? { ...entry, status } : entry)));
+      setStats((prev) => ({
+        ...prev,
+        totalUsers: status === "REJECTED" ? Math.max(0, prev.totalUsers - 1) : prev.totalUsers,
+        pendingInterviews: Math.max(0, prev.pendingInterviews - 1),
+      }));
       toast.success(status === "APPROVED" ? "User request approved." : "User request rejected.");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not update user status.");
@@ -138,45 +129,40 @@ export default function AdminDashboard() {
   useEffect(() => {
     const loadAdminData = async () => {
       try {
-        const [apiStats, pendingUsers] = await Promise.all([
-          usersApi.getStats(),
-          usersApi.getPending(),
+        const [dashboard, allUsers, pendingUsers] = await Promise.all([
+          adminApi.dashboard(),
+          adminApi.users(),
+          adminApi.pendingUsers(),
         ]);
 
-        if (apiStats) {
+        if (dashboard || Array.isArray(allUsers)) {
+          const sourceUsers = Array.isArray(allUsers) ? allUsers : [];
           setStats({
-            tourists: Number(apiStats.tourists || touristsCount),
-            hosts: Number(apiStats.hosts || hostsCount),
-            guides: Number(apiStats.guides || guidesCount),
-            chefs: Number(apiStats.chefs || chefsCount),
-            pendingInterviews: Number(apiStats.pendingInterviews || 0),
+            totalUsers: Number(dashboard?.totalUsers || sourceUsers.length || 0),
+            tourists: sourceUsers.filter((entry: any) => String(entry.role).toUpperCase() === "TOURIST").length,
+            hosts: sourceUsers.filter((entry: any) => String(entry.role).toUpperCase() === "HOST").length,
+            guides: sourceUsers.filter((entry: any) => String(entry.role).toUpperCase() === "GUIDE").length,
+            chefs: sourceUsers.filter((entry: any) => String(entry.role).toUpperCase() === "CHEF").length,
+            pendingInterviews: Number(dashboard?.pendingInterviews || pendingUsers?.length || 0),
           });
         }
 
-        if (Array.isArray(pendingUsers) && pendingUsers.length > 0) {
-          setUsers((prev) => {
-            const existingNonApi = prev.filter((entry) => !entry.id.startsWith("api-"));
-            return [
-              ...pendingUsers.map((entry: any) => ({
-                id: `api-${entry.id}`,
-                backendId: Number(entry.id),
-                name: entry.name,
-                role: String(entry.role || "tourist").toLowerCase(),
-                email: entry.email,
-                city: entry.location || "-",
-                status: entry.status || "PENDING",
-              })),
-              ...existingNonApi,
-            ];
-          });
-        }
+        setUsers(Array.isArray(pendingUsers) ? pendingUsers.map((entry: any) => ({
+          id: `api-${entry.id}`,
+          backendId: Number(entry.id),
+          name: entry.name,
+          role: String(entry.role || "tourist").toLowerCase() as DashboardUser["role"],
+          email: entry.email,
+          city: entry.location || "-",
+          status: entry.status || (entry.isApproved ? "APPROVED" : "PENDING"),
+        })) : []);
       } catch {
-        // Keep local admin mock data when backend is unavailable.
+        setUsers([]);
       }
     };
 
     loadAdminData();
-  }, [touristsCount, hostsCount, guidesCount, chefsCount]);
+  }, []);
 
   const handleAvatarUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -262,15 +248,10 @@ export default function AdminDashboard() {
       return;
     }
 
-    if (label === "Pending Interviews") {
-      setActiveTab("interviews");
-      setCandidateFilter("pending");
+    if (label === "Pending Approvals") {
+      setActiveTab("users");
+      setUserRoleFilter("all");
       return;
-    }
-
-    if (label === "Appointed") {
-      setActiveTab("appointments");
-      setCandidateFilter("appointed");
     }
   };
 
@@ -321,12 +302,12 @@ export default function AdminDashboard() {
             <div className="space-y-8">
               <div className="grid grid-cols-2 md:grid-cols-6 gap-4">
                 {[
+                  { label: "Total Users", value: stats.totalUsers.toLocaleString(), icon: <Users className="h-5 w-5" /> },
                   { label: "Tourists", value: stats.tourists.toLocaleString(), icon: <Users className="h-5 w-5" /> },
                   { label: "Homestay Hosts", value: stats.hosts.toString(), icon: <Building className="h-5 w-5" /> },
                   { label: "Guides", value: stats.guides.toString(), icon: <Map className="h-5 w-5" /> },
                   { label: "Chefs", value: stats.chefs.toString(), icon: <Shield className="h-5 w-5" /> },
-                  { label: "Pending Interviews", value: stats.pendingInterviews.toString(), icon: <Calendar className="h-5 w-5" /> },
-                  { label: "Appointed", value: appointedCount.toString(), icon: <UserCheck className="h-5 w-5" /> },
+                  { label: "Pending Approvals", value: stats.pendingInterviews.toString(), icon: <Calendar className="h-5 w-5" /> },
                 ].map((stat) => (
                   <button
                     key={stat.label}
@@ -406,6 +387,11 @@ export default function AdminDashboard() {
                     </div>
                   </div>
                 ))}
+                {visibleUsers.length === 0 && (
+                  <div className="card-travel p-6 text-center text-muted-foreground">
+                    No pending approvals.
+                  </div>
+                )}
               </div>
             </div>
           )}

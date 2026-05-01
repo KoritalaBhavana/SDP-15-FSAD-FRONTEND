@@ -3,8 +3,8 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
-import { chefs } from "@/lib/mockData";
-import { diningBookingsApi, reviewsApi } from "@/lib/api";
+import { diningBookingsApi, reviewsApi, usersApi } from "@/lib/api";
+import { uploadFiles } from "@/lib/upload";
 import { DEFAULT_AVATAR, getAvatarSrc } from "@/lib/avatar";
 import { Calendar, ChefHat, Clock, MessageSquare, Settings, Star, TrendingUp, User } from "lucide-react";
 import { toast } from "sonner";
@@ -25,20 +25,14 @@ export default function ChefDashboard() {
   const navigate = useNavigate();
 
   const [activeTab, setActiveTab] = useState("overview");
-  const [chefName, setChefName] = useState(user?.name || chefs[0].name);
+  const [chefName, setChefName] = useState(user?.name || "");
   const [chefEmail, setChefEmail] = useState(user?.email || "");
-  const [chefAvatar, setChefAvatar] = useState(user?.avatar || chefs[0].image);
+  const [chefAvatar, setChefAvatar] = useState(user?.avatar || "");
   const [activeReplyReviewId, setActiveReplyReviewId] = useState<string | null>(null);
   const [replyTextByReviewId, setReplyTextByReviewId] = useState<Record<string, string>>({});
 
-  const [chefBookings, setChefBookings] = useState([
-    { id: "cb1", guest: "Riya Sharma", homestay: "Mountain Dew Cottage", date: "Feb 28, 2026", meal: "Dinner", status: "Pending" as ChefBookingStatus, amount: 1800 },
-    { id: "cb2", guest: "Arjun Menon", homestay: "Kerala Heritage Home", date: "Mar 02, 2026", meal: "Lunch", status: "Confirmed" as ChefBookingStatus, amount: 1500 },
-  ]);
-  const [chefReviews, setChefReviews] = useState<ChefReview[]>([
-    { id: "cr1", guest: "Riya Sharma", rating: 5, comment: "Dinner was excellent and beautifully presented." },
-    { id: "cr2", guest: "Arjun Menon", rating: 4, comment: "Great flavors and on-time service.", reply: "Thank you. I would love to cook for you again." },
-  ]);
+  const [chefBookings, setChefBookings] = useState<any[]>([]);
+  const [chefReviews, setChefReviews] = useState<ChefReview[]>([]);
 
   const normalizeBookingStatus = (status: string | undefined): ChefBookingStatus => {
     const normalized = String(status || "Pending").trim().toUpperCase();
@@ -74,9 +68,9 @@ export default function ChefDashboard() {
   };
 
   useEffect(() => {
-    setChefName(user?.name || chefs[0].name);
+    setChefName(user?.name || "");
     setChefEmail(user?.email || "");
-    setChefAvatar(user?.avatar || chefs[0].image);
+    setChefAvatar(user?.avatar || "");
   }, [user]);
 
   useEffect(() => {
@@ -98,7 +92,7 @@ export default function ChefDashboard() {
           })));
         }
       } catch {
-        // Keep local data if backend API is unavailable.
+        setChefBookings([]);
       }
     };
 
@@ -122,7 +116,7 @@ export default function ChefDashboard() {
           })));
         }
       } catch {
-        // Keep local data if backend API is unavailable.
+        setChefReviews([]);
       }
     };
 
@@ -133,16 +127,41 @@ export default function ChefDashboard() {
     const file = event.target.files?.[0];
     if (!file) return;
 
-    const reader = new FileReader();
-    reader.onload = () => {
-      setChefAvatar(String(reader.result || ""));
+    const upload = async () => {
+      try {
+        const [url] = await uploadFiles([file]);
+        setChefAvatar(url);
+        toast.success("Profile image uploaded.");
+      } catch {
+        const reader = new FileReader();
+        reader.onload = () => {
+          setChefAvatar(String(reader.result || ""));
+        };
+        reader.readAsDataURL(file);
+      }
     };
-    reader.readAsDataURL(file);
+
+    void upload();
   };
 
   const handleSaveProfile = () => {
-    updateProfile({ name: chefName.trim(), email: chefEmail.trim(), avatar: chefAvatar });
-    toast.success("Chef profile updated.");
+    const saveProfile = async () => {
+      try {
+        if (user?.id) {
+          await usersApi.update(Number(user.id), {
+            name: chefName.trim(),
+            email: chefEmail.trim(),
+            profileImage: chefAvatar,
+          });
+        }
+        updateProfile({ name: chefName.trim(), email: chefEmail.trim(), avatar: chefAvatar });
+        toast.success("Chef profile updated.");
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : "Could not update profile.");
+      }
+    };
+
+    void saveProfile();
   };
 
   const handleBookingStatus = async (bookingId: string, status: "Confirmed" | "Rejected") => {
@@ -280,6 +299,9 @@ export default function ChefDashboard() {
                     </div>
                   </div>
                 ))}
+                {chefBookings.length === 0 && (
+                  <div className="card-travel p-6 text-center text-muted-foreground">No data yet. Start by adding your first listing.</div>
+                )}
               </div>
             </div>
           )}

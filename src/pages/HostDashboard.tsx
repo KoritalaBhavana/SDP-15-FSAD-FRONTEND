@@ -4,14 +4,9 @@ import { useAuth } from "@/contexts/AuthContext";
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
 import { toast } from "sonner";
-import {
-  addHostHomestay,
-  deleteHostHomestay,
-  getHostDashboardProperties,
-  toHostDashboardProperty,
-  type HostDashboardProperty,
-} from "@/lib/homestayStore";
-import { homestaysApi, bookingsApi } from "@/lib/api";
+import type { HostDashboardProperty } from "@/lib/homestayStore";
+import { homestaysApi, bookingsApi, hostApi, usersApi } from "@/lib/api";
+import { uploadFiles } from "@/lib/upload";
 import {
   Plus, Calendar, Star, DollarSign, Home, MessageSquare,
   CheckCircle, XCircle, Clock, Edit, Eye, TrendingUp, Trash2
@@ -33,29 +28,20 @@ export default function HostDashboard() {
   const [newPropertyLocation, setNewPropertyLocation] = useState("");
   const [newPropertyPrice, setNewPropertyPrice] = useState(1200);
   const [newPropertyImage, setNewPropertyImage] = useState("");
+  const [dashboardStats, setDashboardStats] = useState({
+    totalEarnings: 0,
+    activeBookings: 0,
+    totalReviews: 0,
+    occupancyRate: 0,
+  });
 
-  const seedProperties: HostDashboardProperty[] = [
-    { id: "1", name: "Mountain View Cottage", location: "Manali", price: 1200, status: "Active", bookings: 12, rating: 4.8, image: "https://images.unsplash.com/photo-1512918728675-ed5a9ecdebfd?w=600&q=80", isHostCreated: false },
-    { id: "2", name: "Garden Guest Room", location: "Shimla", price: 850, status: "Active", bookings: 7, rating: 4.6, image: "https://images.unsplash.com/photo-1494526585095-c41746248156?w=600&q=80", isHostCreated: false },
-  ];
+  const [properties, setProperties] = useState<HostDashboardProperty[]>([]);
 
-  const [properties, setProperties] = useState(() => [...getHostDashboardProperties(), ...seedProperties]);
+  const [bookingRequests, setBookingRequests] = useState<any[]>([]);
 
-  const [bookingRequests, setBookingRequests] = useState([
-    { id: "1", guest: "Sneha Patel", dates: "Mar 15-18", guests: 2, property: "Mountain View Cottage", amount: 3600, status: "pending", avatar: "https://i.pravatar.cc/50?img=25" },
-    { id: "2", guest: "Rohit Kumar", dates: "Apr 5-8", guests: 4, property: "Garden Guest Room", amount: 2550, status: "confirmed", avatar: "https://i.pravatar.cc/50?img=65" },
-    { id: "3", guest: "Anita Singh", dates: "Apr 20-22", guests: 3, property: "Mountain View Cottage", amount: 2400, status: "pending", avatar: "https://i.pravatar.cc/50?img=10" },
-  ]);
+  const reviews: any[] = [];
 
-  const reviews = [
-    { id: "r1", guest: "Priya S.", property: "Mountain View Cottage", rating: 5, text: "Great host and clean rooms!" },
-    { id: "r2", guest: "Rahul K.", property: "Garden Guest Room", rating: 4, text: "Comfortable stay and fast responses." },
-  ];
-
-  const messages = [
-    { id: "m1", from: "Sneha Patel", text: "Can we check in early at 12 PM?", time: "10:32 AM" },
-    { id: "m2", from: "Anita Singh", text: "Is parking available for SUV?", time: "Yesterday" },
-  ];
+  const messages: any[] = [];
 
   const tabs = [
     { id: "overview", label: "Overview", icon: TrendingUp },
@@ -68,8 +54,17 @@ export default function HostDashboard() {
   ];
 
   const updateBookingStatus = (requestId: string, status: "confirmed" | "rejected") => {
-    setBookingRequests((prev) => prev.map((req) => (req.id === requestId ? { ...req, status } : req)));
-    toast.success(status === "confirmed" ? "Booking accepted successfully." : "Booking rejected.");
+    const saveStatus = async () => {
+      try {
+        await bookingsApi.updateStatus(Number(requestId), status.toUpperCase());
+      } catch {
+        // Local mock rows do not exist in the backend.
+      }
+      setBookingRequests((prev) => prev.map((req) => (req.id === requestId ? { ...req, status } : req)));
+      toast.success(status === "confirmed" ? "Booking accepted successfully." : "Booking rejected.");
+    };
+
+    void saveStatus();
   };
 
   const handleAddProperty = () => {
@@ -115,24 +110,17 @@ export default function HostDashboard() {
           image: created.imageUrl || "https://images.unsplash.com/photo-1494526585095-c41746248156?w=600&q=80",
           isHostCreated: true,
         }, ...prev]);
-      } catch {
-        const createdHomestay = addHostHomestay({
-          name: newPropertyName,
-          location: newPropertyLocation,
-          price: newPropertyPrice,
-          image: newPropertyImage,
-          hostName: user?.name,
-          hostAvatar: user?.avatar,
-        });
-
-        setProperties((prev) => [toHostDashboardProperty(createdHomestay), ...prev]);
+        toast.success("Property added successfully.");
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "";
+        toast.error(message || "Could not save property.");
+        return;
       } finally {
         setIsAddingProperty(false);
         setNewPropertyName("");
         setNewPropertyLocation("");
         setNewPropertyPrice(1200);
         setNewPropertyImage("");
-        toast.success("Property added successfully.");
       }
     };
 
@@ -143,11 +131,21 @@ export default function HostDashboard() {
     const file = event.target.files?.[0];
     if (!file) return;
 
-    const reader = new FileReader();
-    reader.onload = () => {
-      setNewPropertyImage(String(reader.result || ""));
+    const upload = async () => {
+      try {
+        const [url] = await uploadFiles([file]);
+        setNewPropertyImage(url);
+        toast.success("Property image uploaded.");
+      } catch {
+        const reader = new FileReader();
+        reader.onload = () => {
+          setNewPropertyImage(String(reader.result || ""));
+        };
+        reader.readAsDataURL(file);
+      }
     };
-    reader.readAsDataURL(file);
+
+    void upload();
   };
 
   const handleCloseAddPropertyModal = () => {
@@ -164,12 +162,9 @@ export default function HostDashboard() {
     const removeProperty = async () => {
       try {
         await homestaysApi.remove(Number(property.id));
-      } catch {
-        const deleted = deleteHostHomestay(property.id);
-        if (!deleted) {
-          toast.error("Could not delete property. Please try again.");
-          return;
-        }
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : "Could not delete property. Please try again.");
+        return;
       }
 
       setProperties((prev) => prev.filter((prop) => prop.id !== property.id));
@@ -180,8 +175,23 @@ export default function HostDashboard() {
   };
 
   const handleSaveProfile = () => {
-    updateProfile({ name: hostName.trim(), email: hostEmail.trim(), avatar: hostAvatar });
-    toast.success("Profile settings updated.");
+    const saveProfile = async () => {
+      try {
+        if (user?.id) {
+          await usersApi.update(Number(user.id), {
+            name: hostName.trim(),
+            email: hostEmail.trim(),
+            profileImage: hostAvatar,
+          });
+        }
+        updateProfile({ name: hostName.trim(), email: hostEmail.trim(), avatar: hostAvatar });
+        toast.success("Profile settings updated.");
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : "Could not update profile.");
+      }
+    };
+
+    void saveProfile();
   };
 
   useEffect(() => {
@@ -210,9 +220,10 @@ export default function HostDashboard() {
         return;
       }
       try {
-        const [apiHomestays, apiBookings] = await Promise.all([
+        const [apiHomestays, apiBookings, dashboard] = await Promise.all([
           homestaysApi.getByHost(Number(user.id)),
           bookingsApi.getByHost(Number(user.id)),
+          hostApi.dashboard(),
         ]);
 
         if (Array.isArray(apiHomestays) && apiHomestays.length > 0) {
@@ -241,8 +252,19 @@ export default function HostDashboard() {
             avatar: "https://i.pravatar.cc/50",
           })));
         }
+
+        if (dashboard) {
+          setDashboardStats({
+            totalEarnings: Number(dashboard.totalEarnings || 0),
+            activeBookings: Number(dashboard.activeBookings || 0),
+            totalReviews: Number(dashboard.reviews || 0),
+            occupancyRate: Number(dashboard.occupancyRate || 0),
+          });
+        }
       } catch {
-        // Keep mock dashboard data when backend API is unavailable.
+        setProperties([]);
+        setBookingRequests([]);
+        setDashboardStats({ totalEarnings: 0, activeBookings: 0, totalReviews: 0, occupancyRate: 0 });
       }
     };
 
@@ -253,11 +275,21 @@ export default function HostDashboard() {
     const file = event.target.files?.[0];
     if (!file) return;
 
-    const reader = new FileReader();
-    reader.onload = () => {
-      setHostAvatar(String(reader.result || ""));
+    const upload = async () => {
+      try {
+        const [url] = await uploadFiles([file]);
+        setHostAvatar(url);
+        toast.success("Profile image uploaded.");
+      } catch {
+        const reader = new FileReader();
+        reader.onload = () => {
+          setHostAvatar(String(reader.result || ""));
+        };
+        reader.readAsDataURL(file);
+      }
     };
-    reader.readAsDataURL(file);
+
+    void upload();
   };
 
   const handleOverviewCardClick = (label: string) => {
@@ -346,10 +378,10 @@ export default function HostDashboard() {
             <div className="space-y-8">
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 {[
-                  { label: "Total Earnings", value: "₹42,500", icon: "💰", trend: "+12%" },
-                  { label: "Active Bookings", value: "3", icon: "📅", trend: "+2" },
-                  { label: "Total Reviews", value: "28", icon: "⭐", trend: "+5" },
-                  { label: "Occupancy Rate", value: "78%", icon: "📊", trend: "+8%" },
+                    { label: "Total Earnings", value: `₹${dashboardStats.totalEarnings.toLocaleString("en-IN")}`, icon: "💰", trend: "" },
+                    { label: "Active Bookings", value: String(dashboardStats.activeBookings), icon: "📅", trend: "" },
+                    { label: "Total Reviews", value: String(dashboardStats.totalReviews), icon: "⭐", trend: "" },
+                    { label: "Occupancy Rate", value: `${dashboardStats.occupancyRate}%`, icon: "📊", trend: "" },
                 ].map((stat) => (
                   <button
                     key={stat.label}
@@ -358,7 +390,7 @@ export default function HostDashboard() {
                   >
                     <div className="flex items-start justify-between">
                       <span className="text-2xl">{stat.icon}</span>
-                      <span className="text-xs text-green-600 font-semibold bg-green-50 px-2 py-0.5 rounded-full">{stat.trend}</span>
+                      {stat.trend && <span className="text-xs text-green-600 font-semibold bg-green-50 px-2 py-0.5 rounded-full">{stat.trend}</span>}
                     </div>
                     <div className="text-2xl font-bold text-foreground mt-2">{stat.value}</div>
                     <div className="text-xs text-muted-foreground">{stat.label}</div>
@@ -389,6 +421,9 @@ export default function HostDashboard() {
                       </div>
                     </div>
                   ))}
+                  {bookingRequests.filter(b => b.status === "pending").length === 0 && (
+                    <div className="card-travel p-6 text-center text-muted-foreground">No data yet. Start by adding your first listing.</div>
+                  )}
                 </div>
               </div>
             </div>
@@ -451,6 +486,11 @@ export default function HostDashboard() {
                     </div>
                   </div>
                 ))}
+                {properties.length === 0 && (
+                  <div className="card-travel p-6 text-center text-muted-foreground">
+                    No data yet. Start by adding your first listing.
+                  </div>
+                )}
                 {/* Add Property Card */}
                 <button onClick={() => setIsAddingProperty(true)} className="card-travel border-2 border-dashed border-border hover:border-primary/50 p-8 flex flex-col items-center justify-center gap-3 text-muted-foreground hover:text-primary transition-all min-h-[300px]">
                   <div className="w-12 h-12 rounded-full border-2 border-current flex items-center justify-center">
@@ -516,6 +556,9 @@ export default function HostDashboard() {
                     )}
                   </div>
                 ))}
+                {visibleBookingRequests.length === 0 && (
+                  <div className="card-travel p-6 text-center text-muted-foreground">No data yet. Start by adding your first listing.</div>
+                )}
               </div>
             </div>
           )}
@@ -524,10 +567,10 @@ export default function HostDashboard() {
             <div>
               <h2 className="text-xl font-bold text-foreground mb-6">Earnings Summary</h2>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
-                {[
-                  { label: "This Month", value: "₹18,500", icon: "📈" },
-                  { label: "Total Earned", value: "₹1,42,500", icon: "💰" },
-                  { label: "Pending Payout", value: "₹6,200", icon: "⏳" },
+                  {[
+                    { label: "This Month", value: `₹${dashboardStats.totalEarnings.toLocaleString("en-IN")}`, icon: "📈" },
+                    { label: "Total Earned", value: `₹${dashboardStats.totalEarnings.toLocaleString("en-IN")}`, icon: "💰" },
+                    { label: "Pending Payout", value: "₹0", icon: "⏳" },
                 ].map((e) => (
                   <div key={e.label} className="card-travel p-6 text-center">
                     <div className="text-3xl mb-2">{e.icon}</div>
@@ -539,22 +582,21 @@ export default function HostDashboard() {
               <div className="card-travel p-6">
                 <h3 className="font-bold text-foreground mb-4">Recent Transactions</h3>
                 <div className="space-y-3">
-                  {[
-                    { guest: "Sneha Patel", amount: 3600, date: "Mar 18", status: "Received" },
-                    { guest: "Rohit Kumar", amount: 2550, date: "Mar 10", status: "Received" },
-                    { guest: "Anita Singh", amount: 4800, date: "Feb 25", status: "Received" },
-                  ].map((t, i) => (
+                  {bookingRequests.filter((booking) => booking.status === "confirmed").map((t, i) => (
                     <div key={i} className="flex items-center justify-between py-3 border-b border-border last:border-0">
                       <div>
                         <p className="font-medium text-foreground text-sm">{t.guest}</p>
-                        <p className="text-xs text-muted-foreground">{t.date}</p>
+                        <p className="text-xs text-muted-foreground">{t.dates}</p>
                       </div>
                       <div className="text-right">
                         <p className="font-bold text-green-600">+₹{t.amount.toLocaleString()}</p>
-                        <p className="text-xs text-green-600">{t.status}</p>
+                        <p className="text-xs text-green-600">Received</p>
                       </div>
                     </div>
                   ))}
+                  {bookingRequests.filter((booking) => booking.status === "confirmed").length === 0 && (
+                    <div className="py-3 text-center text-sm text-muted-foreground">No data yet. Start by adding your first listing.</div>
+                  )}
                 </div>
               </div>
             </div>
@@ -601,6 +643,9 @@ export default function HostDashboard() {
                     </div>
                   </div>
                 ))}
+                {reviews.length === 0 && (
+                  <div className="card-travel p-6 text-center text-muted-foreground">No data yet. Start by adding your first listing.</div>
+                )}
               </div>
             </div>
           )}
@@ -637,6 +682,9 @@ export default function HostDashboard() {
                     </div>
                   </div>
                 ))}
+                {messages.length === 0 && (
+                  <div className="card-travel p-6 text-center text-muted-foreground">No data yet. Start by adding your first listing.</div>
+                )}
               </div>
             </div>
           )}

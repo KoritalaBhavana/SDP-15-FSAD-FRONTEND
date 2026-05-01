@@ -38,7 +38,7 @@ export const adaptHomestay = (item: any): FrontendHomestay => {
     price: Number(item?.pricePerNight || item?.price || 0),
     rating: Number(item?.rating || 0),
     reviews: Number(item?.reviewCount || item?.reviews || 0),
-    image: item?.imageUrl || item?.image || DEFAULT_HOMESTAY_IMAGE,
+    image: item?.imageUrl || item?.imageUrls?.split(",")[0]?.trim() || item?.image || DEFAULT_HOMESTAY_IMAGE,
     category: item?.category || "Family Stay",
     amenities,
     description: item?.description || "A verified homestay listed on TravelNestPro.",

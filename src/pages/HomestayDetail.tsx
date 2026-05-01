@@ -2,8 +2,9 @@ import { useEffect, useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
-import { useHomestays } from "@/hooks/useHomestays";
 import { useAuth } from "@/contexts/AuthContext";
+import { homestaysApi } from "@/lib/api";
+import { adaptHomestay, type FrontendHomestay } from "@/lib/homestayApiAdapter";
 import {
   Star, MapPin, Heart, Share2, ChevronLeft, ChevronRight,
   Wifi, Car, Utensils, Waves, Shield, Users, BedDouble,
@@ -24,13 +25,65 @@ export default function HomestayDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
   const { isLoggedIn, user } = useAuth();
-  const homestays = useHomestays();
-  const homestay = homestays.find((h) => h.id === id) || homestays[0];
+  const [homestay, setHomestay] = useState<FrontendHomestay | null>(null);
+  const [error, setError] = useState(false);
   const [imgIdx, setImgIdx] = useState(0);
   const [wishlisted, setWishlisted] = useState(false);
   const [checkIn, setCheckIn] = useState("");
   const [checkOut, setCheckOut] = useState("");
   const [guests, setGuests] = useState(2);
+
+  useEffect(() => {
+    let ignore = false;
+
+    const loadHomestay = async () => {
+      if (!id) {
+        setError(true);
+        return;
+      }
+
+      try {
+        setError(false);
+        setHomestay(null);
+        const response = await homestaysApi.getById(Number(id));
+        if (!ignore) {
+          setHomestay(adaptHomestay(response));
+        }
+      } catch {
+        if (!ignore) {
+          setError(true);
+          setHomestay(null);
+        }
+      }
+    };
+
+    void loadHomestay();
+
+    return () => {
+      ignore = true;
+    };
+  }, [id]);
+
+  useEffect(() => {
+    const syncWishlist = async () => {
+      if (!homestay || !user?.id || user.role !== "tourist") {
+        setWishlisted(false);
+        return;
+      }
+      const ids = await loadWishlistIds(Number(user.id));
+      setWishlisted(ids.includes(Number(homestay.id)));
+    };
+
+    void syncWishlist();
+  }, [homestay?.id, user?.id, user?.role]);
+
+  if (error) {
+    return <p>Property not found or failed to load</p>;
+  }
+
+  if (!homestay) {
+    return <p>Loading...</p>;
+  }
 
   const images = [
     homestay.image,
@@ -48,19 +101,6 @@ export default function HomestayDetail() {
   const subtotal = nights * homestay.price;
   const taxes = Math.round(subtotal * 0.12);
   const total = subtotal + taxes;
-
-  useEffect(() => {
-    const syncWishlist = async () => {
-      if (!user?.id || user.role !== "tourist") {
-        setWishlisted(false);
-        return;
-      }
-      const ids = await loadWishlistIds(Number(user.id));
-      setWishlisted(ids.includes(Number(homestay.id)));
-    };
-
-    void syncWishlist();
-  }, [homestay.id, user?.id, user?.role]);
 
   const handleContactHost = () => {
     if (!isLoggedIn) {

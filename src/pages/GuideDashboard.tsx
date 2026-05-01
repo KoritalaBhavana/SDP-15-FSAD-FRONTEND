@@ -3,8 +3,8 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
-import { guides, attractions as initialAttractions } from "@/lib/mockData";
-import { attractionsApi, guideBookingsApi, itinerariesApi } from "@/lib/api";
+import { attractionsApi, guideBookingsApi, itinerariesApi, usersApi } from "@/lib/api";
+import { uploadFiles } from "@/lib/upload";
 import { DEFAULT_AVATAR, getAvatarSrc } from "@/lib/avatar";
 import { toast } from "sonner";
 import { Star, MapPin, MessageSquare, Calendar, BookOpen, Camera, TrendingUp } from "lucide-react";
@@ -35,22 +35,24 @@ export default function GuideDashboard() {
   const [newAttractionBestTime, setNewAttractionBestTime] = useState("October - March");
   const [newAttractionEntryFee, setNewAttractionEntryFee] = useState(0);
 
-  const [bookingRequests, setBookingRequests] = useState([
-    { id: "b1", tourist: "Priya Sharma", dates: "Mar 20-22", activity: "Trekking", amount: 3000, status: "Confirmed" },
-    { id: "b2", tourist: "Aryan Khanna", dates: "Apr 1", activity: "Photography Tour", amount: 1500, status: "Pending" },
-  ]);
+  const [bookingRequests, setBookingRequests] = useState<any[]>([]);
 
-  const reviews = [
-    { id: "r1", tourist: "Sneha Patel", rating: 5, text: "Amazing storyteller and great local recommendations." },
-    { id: "r2", tourist: "Rohit Kumar", rating: 4, text: "Very helpful and friendly guide." },
-  ];
+  const reviews: any[] = [];
 
-  const messages = [
-    { id: "m1", from: "Nisha", text: "Can you arrange a sunrise trek?", time: "11:20 AM" },
-    { id: "m2", from: "Amit", text: "Is pickup included in your day plan?", time: "Yesterday" },
-  ];
+  const messages: any[] = [];
 
-  const myGuideProfile = guides[0];
+  const myGuideProfile = {
+    name: user?.name || "",
+    image: user?.avatar || "",
+    about: "",
+    location: "",
+    specialties: [] as string[],
+    languages: [] as string[],
+    experience: "",
+    price: 0,
+    rating: 0,
+    reviews: 0,
+  };
 
   const tabs = [
     { id: "overview", label: "Overview", icon: TrendingUp },
@@ -62,13 +64,9 @@ export default function GuideDashboard() {
     { id: "profile", label: "Profile", icon: BookOpen },
   ];
 
-  const [itineraries, setItineraries] = useState([
-    { id: "1", title: "3 Days in Manali - Complete Himalayan Experience", days: 3, places: 8, rating: 4.9, views: 1240 },
-    { id: "2", title: "Hidden Gems of Old Manali", days: 1, places: 5, rating: 4.7, views: 890 },
-    { id: "3", title: "Photography Tour - Mountain Sunrise to Sunset", days: 2, places: 6, rating: 4.8, views: 652 },
-  ]);
+  const [itineraries, setItineraries] = useState<any[]>([]);
 
-  const [guideAttractions, setGuideAttractions] = useState(initialAttractions);
+  const [guideAttractions, setGuideAttractions] = useState<any[]>([]);
   const validTabs = ["overview", "itineraries", "attractions", "bookings", "reviews", "messages", "profile"];
 
   const handleTabChange = (tabId: string) => {
@@ -86,13 +84,38 @@ export default function GuideDashboard() {
   };
 
   const handleBookingStatus = (requestId: string, status: "Confirmed" | "Rejected") => {
-    setBookingRequests((prev) => prev.map((request) => (request.id === requestId ? { ...request, status } : request)));
-    toast.success(status === "Confirmed" ? "Booking request accepted." : "Booking request rejected.");
+    const saveStatus = async () => {
+      try {
+        await guideBookingsApi.updateStatus(Number(requestId), status.toUpperCase());
+      } catch {
+        // Local mock rows do not exist in the backend.
+      }
+      setBookingRequests((prev) => prev.map((request) => (request.id === requestId ? { ...request, status } : request)));
+      toast.success(status === "Confirmed" ? "Booking request accepted." : "Booking request rejected.");
+    };
+
+    void saveStatus();
   };
 
   const handleSaveProfile = () => {
-    updateProfile({ name: guideName.trim(), email: guideEmail.trim(), avatar: guideAvatar });
-    toast.success("Guide profile updated.");
+    const saveProfile = async () => {
+      try {
+        if (user?.id) {
+          await usersApi.update(Number(user.id), {
+            name: guideName.trim(),
+            email: guideEmail.trim(),
+            profileImage: guideAvatar,
+            bio: guideAbout,
+          });
+        }
+        updateProfile({ name: guideName.trim(), email: guideEmail.trim(), avatar: guideAvatar });
+        toast.success("Guide profile updated.");
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : "Could not update profile.");
+      }
+    };
+
+    void saveProfile();
   };
 
   const openAttractionInMaps = (name: string, locationName: string) => {
@@ -165,7 +188,9 @@ export default function GuideDashboard() {
           })));
         }
       } catch {
-        // Keep local data if backend API is unavailable.
+        setItineraries([]);
+        setGuideAttractions([]);
+        setBookingRequests([]);
       }
     };
 
@@ -176,11 +201,21 @@ export default function GuideDashboard() {
     const file = event.target.files?.[0];
     if (!file) return;
 
-    const reader = new FileReader();
-    reader.onload = () => {
-      setGuideAvatar(String(reader.result || ""));
+    const upload = async () => {
+      try {
+        const [url] = await uploadFiles([file]);
+        setGuideAvatar(url);
+        toast.success("Profile image uploaded.");
+      } catch {
+        const reader = new FileReader();
+        reader.onload = () => {
+          setGuideAvatar(String(reader.result || ""));
+        };
+        reader.readAsDataURL(file);
+      }
     };
-    reader.readAsDataURL(file);
+
+    void upload();
   };
 
   const handleEditItinerary = (id: string) => {
@@ -205,13 +240,31 @@ export default function GuideDashboard() {
       return;
     }
 
-    setItineraries((prev) => prev.map((it) => (
-      it.id === editingItineraryId
-        ? { ...it, title: itineraryTitle.trim(), days: itineraryDays, places: itineraryPlaces }
-        : it
-    )));
-    setEditingItineraryId(null);
-    toast.success("Itinerary updated.");
+    const saveItinerary = async () => {
+      try {
+        await itinerariesApi.update(Number(editingItineraryId), {
+          guideId: Number(user?.id),
+          title: itineraryTitle.trim(),
+          description: "Guide-created itinerary",
+          durationDays: itineraryDays,
+          places: Array.from({ length: itineraryPlaces }, (_, index) => `Place ${index + 1}`).join(","),
+          price: 1500,
+        });
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : "Could not update itinerary.");
+        return;
+      }
+
+      setItineraries((prev) => prev.map((it) => (
+        it.id === editingItineraryId
+          ? { ...it, title: itineraryTitle.trim(), days: itineraryDays, places: itineraryPlaces }
+          : it
+      )));
+      setEditingItineraryId(null);
+      toast.success("Itinerary updated.");
+    };
+
+    void saveItinerary();
   };
 
   const handleCreateItinerary = () => {
@@ -220,30 +273,59 @@ export default function GuideDashboard() {
       return;
     }
 
-    setItineraries((prev) => [
-      {
-        id: Date.now().toString(),
-        title: itineraryTitle.trim(),
-        days: itineraryDays,
-        places: itineraryPlaces,
-        rating: 0,
-        views: 0,
-      },
-      ...prev,
-    ]);
-    setIsCreatingItinerary(false);
-    toast.success("Itinerary created.");
+    const createItinerary = async () => {
+      try {
+        const created = await itinerariesApi.create({
+          guideId: Number(user?.id),
+          title: itineraryTitle.trim(),
+          description: "Guide-created itinerary",
+          durationDays: itineraryDays,
+          places: Array.from({ length: itineraryPlaces }, (_, index) => `Place ${index + 1}`).join(","),
+          price: 1500,
+        });
+        const createdId = String(created.id);
+        setItineraries((prev) => [
+          {
+            id: createdId,
+            title: itineraryTitle.trim(),
+            days: itineraryDays,
+            places: itineraryPlaces,
+            rating: 0,
+            views: 0,
+          },
+          ...prev,
+        ]);
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : "Could not create itinerary.");
+        return;
+      }
+
+      setIsCreatingItinerary(false);
+      toast.success("Itinerary created.");
+    };
+
+    void createItinerary();
   };
 
   const handleAttractionImageUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
 
-    const reader = new FileReader();
-    reader.onload = () => {
-      setNewAttractionImage(String(reader.result || ""));
+    const upload = async () => {
+      try {
+        const [url] = await uploadFiles([file]);
+        setNewAttractionImage(url);
+        toast.success("Attraction image uploaded.");
+      } catch {
+        const reader = new FileReader();
+        reader.onload = () => {
+          setNewAttractionImage(String(reader.result || ""));
+        };
+        reader.readAsDataURL(file);
+      }
     };
-    reader.readAsDataURL(file);
+
+    void upload();
   };
 
   const resetAttractionForm = () => {
@@ -268,23 +350,44 @@ export default function GuideDashboard() {
       return;
     }
 
-    const newAttraction = {
-      id: Date.now().toString(),
-      name: newAttractionName.trim(),
-      location: newAttractionLocation.trim(),
-      image: newAttractionImage,
-      rating: 4.7,
-      entryFee: Math.max(0, newAttractionEntryFee || 0),
-      bestTime: newAttractionBestTime.trim() || "October - March",
-      distance: newAttractionDistance.trim() || "1 km",
-      description: newAttractionDescription.trim(),
-      category: newAttractionCategory,
+    const addAttraction = async () => {
+      try {
+        const created = await attractionsApi.create({
+          name: newAttractionName.trim(),
+          description: newAttractionDescription.trim(),
+          location: newAttractionLocation.trim(),
+          city: newAttractionLocation.trim(),
+          category: newAttractionCategory,
+          imageUrl: newAttractionImage,
+          entryFee: Math.max(0, newAttractionEntryFee || 0),
+          bestTime: newAttractionBestTime.trim() || "October - March",
+          distanceKm: Number.parseFloat(newAttractionDistance) || 1,
+          addedBy: Number(user?.id),
+        });
+        const newAttraction = {
+          id: String(created.id),
+          name: newAttractionName.trim(),
+          location: newAttractionLocation.trim(),
+          image: newAttractionImage,
+          rating: Number(created.rating || 0),
+          entryFee: Math.max(0, newAttractionEntryFee || 0),
+          bestTime: newAttractionBestTime.trim() || "October - March",
+          distance: newAttractionDistance.trim() || "1 km",
+          description: newAttractionDescription.trim(),
+          category: newAttractionCategory,
+        };
+
+        setGuideAttractions((prev) => [newAttraction, ...prev]);
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : "Could not add attraction.");
+        return;
+      }
+      setIsAddingAttraction(false);
+      resetAttractionForm();
+      toast.success("Attraction added successfully.");
     };
 
-    setGuideAttractions((prev) => [newAttraction, ...prev]);
-    setIsAddingAttraction(false);
-    resetAttractionForm();
-    toast.success("Attraction added successfully.");
+    void addAttraction();
   };
 
   const handleSendReply = (targetId: string, targetName: string) => {
@@ -345,10 +448,10 @@ export default function GuideDashboard() {
             <div className="space-y-8">
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 {[
-                  { label: "Total Tourists", value: "87", icon: "👥", tab: "bookings" },
-                  { label: "Itineraries", value: "12", icon: "📍", tab: "itineraries" },
-                  { label: "Avg Rating", value: "4.9", icon: "⭐", tab: "reviews" },
-                  { label: "Earnings", value: "₹62K", icon: "💰", tab: "bookings" },
+                  { label: "Total Tourists", value: String(bookingRequests.length), icon: "👥", tab: "bookings" },
+                  { label: "Itineraries", value: String(itineraries.length), icon: "📍", tab: "itineraries" },
+                  { label: "Avg Rating", value: "0.0", icon: "⭐", tab: "reviews" },
+                  { label: "Earnings", value: `₹${bookingRequests.filter((b) => b.status === "Confirmed").reduce((sum, b) => sum + Number(b.amount || 0), 0).toLocaleString("en-IN")}`, icon: "💰", tab: "bookings" },
                 ].map((stat) => (
                   <button
                     key={stat.label}
@@ -424,6 +527,9 @@ export default function GuideDashboard() {
                       )}
                     </div>
                   ))}
+                  {bookingRequests.length === 0 && (
+                    <div className="card-travel p-6 text-center text-muted-foreground">No data yet. Start by adding your first listing.</div>
+                  )}
                 </div>
               </div>
             </div>
@@ -466,6 +572,9 @@ export default function GuideDashboard() {
                     <button onClick={() => handleEditItinerary(it.id)} className="btn-outline-primary text-sm py-1.5">Edit</button>
                   </div>
                 ))}
+                {itineraries.length === 0 && (
+                  <div className="card-travel p-6 text-center text-muted-foreground">No data yet. Start by adding your first listing.</div>
+                )}
               </div>
             </div>
           )}
@@ -507,6 +616,9 @@ export default function GuideDashboard() {
                     </div>
                   </div>
                 ))}
+                {guideAttractions.length === 0 && (
+                  <div className="card-travel p-6 text-center text-muted-foreground">No data yet. Start by adding your first listing.</div>
+                )}
               </div>
             </div>
           )}
@@ -532,6 +644,9 @@ export default function GuideDashboard() {
                     </div>
                   </div>
                 ))}
+                {bookingRequests.length === 0 && (
+                  <div className="card-travel p-6 text-center text-muted-foreground">No data yet. Start by adding your first listing.</div>
+                )}
               </div>
             </div>
           )}
@@ -577,6 +692,9 @@ export default function GuideDashboard() {
                     </div>
                   </div>
                 ))}
+                {reviews.length === 0 && (
+                  <div className="card-travel p-6 text-center text-muted-foreground">No data yet. Start by adding your first listing.</div>
+                )}
               </div>
             </div>
           )}
@@ -613,6 +731,9 @@ export default function GuideDashboard() {
                     </div>
                   </div>
                 ))}
+                {messages.length === 0 && (
+                  <div className="card-travel p-6 text-center text-muted-foreground">No data yet. Start by adding your first listing.</div>
+                )}
               </div>
             </div>
           )}

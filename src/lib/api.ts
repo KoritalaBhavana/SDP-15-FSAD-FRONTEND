@@ -6,7 +6,12 @@ export interface ApiUser {
   email: string;
   role: string;
   profileImage?: string;
-  status: string;
+  status?: string;
+  isVerified?: boolean;
+  isApproved?: boolean;
+  onboardingCompleted?: boolean;
+  isNew?: boolean;
+  isNewUser?: boolean;
   token?: string;
 }
 
@@ -24,7 +29,7 @@ export interface LoginPayload {
 }
 
 export interface HomestayPayload {
-  hostId: number;
+  hostId?: number;
   title: string;
   description?: string;
   location: string;
@@ -35,7 +40,10 @@ export interface HomestayPayload {
   maxGuests: number;
   amenities?: string;
   imageUrl?: string;
+  imageUrls?: string;
   distanceInfo?: string;
+  checkInDate?: string;
+  checkOutDate?: string;
 }
 
 export interface BookingPayload {
@@ -62,6 +70,7 @@ export interface ItineraryPayload {
   durationDays: number;
   places: string;
   price: number;
+  imageUrls?: string;
 }
 
 export interface MessagePayload {
@@ -131,6 +140,8 @@ export const usersApi = {
   async getById(id: number) { try { const response = await apiClient.get(`/users/${id}`); return response.data; } catch (error) { throwApiError(error); } },
   async update(id: number, payload: Record<string, unknown>) { try { const response = await apiClient.put(`/users/${id}`, payload); return response.data; } catch (error) { throwApiError(error); } },
   async updateImage(id: number, imageUrl: string) { try { const response = await apiClient.put(`/users/${id}/image`, { imageUrl }); return response.data; } catch (error) { throwApiError(error); } },
+  async updateProfile(formData: FormData) { try { const response = await apiClient.put("/user/update-profile", formData); return response.data; } catch (error) { throwApiError(error); } },
+  async requestVerification() { try { const response = await apiClient.post("/user/request-verification"); return response.data; } catch (error) { throwApiError(error); } },
   async getByRole(role: string) { try { const response = await apiClient.get(`/users/role/${role}`); return response.data; } catch (error) { throwApiError(error); } },
   async getPending() { try { const response = await apiClient.get("/users/pending"); return response.data; } catch (error) { throwApiError(error); } },
   async updateStatus(id: number, status: string) { try { const response = await apiClient.put(`/users/${id}/status`, { status }); return response.data; } catch (error) { throwApiError(error); } },
@@ -138,9 +149,22 @@ export const usersApi = {
 };
 
 export const homestaysApi = {
-  async create(payload: HomestayPayload) { try { const response = await apiClient.post("/homestays", payload); return response.data; } catch (error) { throwApiError(error); } },
-  async getAll() { try { const response = await apiClient.get("/homestays"); return response.data; } catch (error) { throwApiError(error); } },
-  async getById(id: number) { try { const response = await apiClient.get(`/homestays/${id}`); return response.data; } catch (error) { throwApiError(error); } },
+  async create(payload: HomestayPayload) {
+    try {
+      const formData = new FormData();
+      Object.entries(payload).forEach(([key, value]) => {
+        if (value !== undefined && value !== null) {
+          formData.append(key, String(value));
+        }
+      });
+      const response = await apiClient.post("/properties", formData);
+      return response.data;
+    } catch (error) {
+      throwApiError(error);
+    }
+  },
+  async getAll() { try { const response = await apiClient.get("/properties"); return response.data; } catch (error) { throwApiError(error); } },
+  async getById(id: number) { try { const response = await apiClient.get(`/properties/${id}`); return response.data; } catch (error) { throwApiError(error); } },
   async getByHost(hostId: number) { try { const response = await apiClient.get(`/homestays/host/${hostId}`); return response.data; } catch (error) { throwApiError(error); } },
   async update(id: number, payload: HomestayPayload) { try { const response = await apiClient.put(`/homestays/${id}`, payload); return response.data; } catch (error) { throwApiError(error); } },
   async remove(id: number) { try { const response = await apiClient.delete(`/homestays/${id}`); return response.data; } catch (error) { throwApiError(error); } },
@@ -188,9 +212,27 @@ export const messagesApi = {
 };
 
 export const notificationsApi = {
+  async getCurrent() { try { const response = await apiClient.get("/notifications"); return response.data; } catch (error) { throwApiError(error); } },
   async getByUser(userId: number) { try { const response = await apiClient.get(`/notifications/${userId}`); return response.data; } catch (error) { throwApiError(error); } },
   async markRead(id: number) { try { const response = await apiClient.put(`/notifications/${id}/read`); return response.data; } catch (error) { throwApiError(error); } },
   async markAllRead(userId: number) { try { const response = await apiClient.put(`/notifications/user/${userId}/readall`); return response.data; } catch (error) { throwApiError(error); } },
+};
+
+export const adminApi = {
+  async dashboard() { try { const response = await apiClient.get("/admin/dashboard"); return response.data; } catch (error) { throwApiError(error); } },
+  async users() { try { const response = await apiClient.get("/admin/users"); return response.data; } catch (error) { throwApiError(error); } },
+  async pendingUsers() { try { const response = await apiClient.get("/admin/pending-users"); return response.data; } catch (error) { throwApiError(error); } },
+  async approveUser(id: number) { try { const response = await apiClient.put(`/admin/approve/${id}`); return response.data; } catch (error) { throwApiError(error); } },
+  async rejectUser(id: number) { try { const response = await apiClient.put(`/admin/reject/${id}`); return response.data; } catch (error) { throwApiError(error); } },
+  async approveProperty(id: number) { try { const response = await apiClient.put(`/admin/approve-property/${id}`); return response.data; } catch (error) { throwApiError(error); } },
+};
+
+export const hostApi = {
+  async dashboard() { try { const response = await apiClient.get("/host/dashboard"); return response.data; } catch (error) { throwApiError(error); } },
+};
+
+export const guideApi = {
+  async dashboard() { try { const response = await apiClient.get("/guide/dashboard"); return response.data; } catch (error) { throwApiError(error); } },
 };
 
 export const wishlistApi = {

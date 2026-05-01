@@ -77,7 +77,16 @@ export default function AuthV2() {
   }, [isSignup, selectedRole]);
 
   useEffect(() => {
-    if (isLoggedIn && user) navigate(getDashboardPath(user.role));
+    if (!isLoggedIn || !user) return;
+    if (user.role === "tourist") {
+      navigate("/home", { replace: true });
+      return;
+    }
+    if (!user.isApproved) {
+      navigate("/pending-approval", { replace: true });
+      return;
+    }
+    navigate(getDashboardPath(user.role), { replace: true });
   }, [isLoggedIn, user, navigate]);
 
   const handleSubmit = async (e: React.FormEvent) => {

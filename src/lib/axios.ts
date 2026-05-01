@@ -10,6 +10,15 @@ const apiClient = axios.create({
 });
 
 apiClient.interceptors.request.use((config) => {
+  if (config.data instanceof FormData) {
+    delete config.headers["Content-Type"];
+  }
+
+  const token = localStorage.getItem("token");
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+
   const rawUser = localStorage.getItem("user");
   if (rawUser) {
     try {
@@ -29,6 +38,7 @@ apiClient.interceptors.response.use(
   (error) => {
     if (error?.response?.status === 401) {
       localStorage.removeItem("user");
+      localStorage.removeItem("token");
       window.location.href = "/auth";
     }
     return Promise.reject(error);
